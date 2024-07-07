@@ -13,17 +13,20 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
 n_embd = 32
 
-# Load data from Excel
+# load data
 df = pd.read_excel("C:\\Users\\ryand\\OneDrive\\Documents\\addition data.xlsx")
 column_a = df['a']
 column_b = df['b']
 column_sum = df['sum']
 
-# Encode the data
+# organize data into 'a + b = sum' format
 text = [(f"{a} + {b} = {sum}") for a, b, sum in zip(column_a, column_b, column_sum)]
+
+# get encoding for GPT-2
 enc = tiktoken.get_encoding('gpt2')
 vocab_size = enc.n_vocab
 
+# encode data into tensors
 data = []
 for equation in text:
     tensor = torch.tensor(enc.encode(equation), dtype=torch.long)
@@ -68,6 +71,7 @@ class BigramLanguageModel(nn.Module):
         if targets is None:
             loss = None
         else:
+            # compute loss
             B, T, C = logits.shape
             logits = logits.view(B * T, C)
             targets = targets.view(B * T)
