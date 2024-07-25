@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 batch_size = 32
-block_size = 20
+block_size = 30
 max_iters = 5000
 eval_interval = 500
 learning_rate = 1e-4
@@ -15,7 +15,7 @@ n_layer = 6
 dropout = 0.5
 
 # mapping from characters to integers
-vocab = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '=', ' ']
+vocab = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '-', '*', '/', '=', ' ']
 vocab_size = len(vocab)
 char_to_idx = {ch: idx for idx, ch in enumerate(vocab)}
 idx_to_char = {idx: ch for ch, idx in char_to_idx.items()}
@@ -33,17 +33,35 @@ def decode(indices: list[int]) -> str:
 def reverse_sum(problem: str) -> str:
     '''Reverse the sum part of addition problem'''
     parts = problem.split('=')
-    addends = parts[0].strip()
+    expression = parts[0].strip()
     sum = parts[1][::-1].strip()
-    decoded_text = f"{addends} = {sum}"
+    decoded_text = f"{expression} = {sum}"
     return decoded_text
 
 def generate_random_problem():
     '''Generate random addition problems'''
-    a = str(torch.randint(0, 10000, (1,)).item())
-    b = str(torch.randint(0, 10000, (1,)).item())
-    c = str(int(a) + int(b))[::-1] # reverse output to simulate typical addition algorithm
-    return f"{a} + {b} = {c}"
+    while True:
+        a = str(torch.randint(0, 10000, (1,)).item())
+        b = str(torch.randint(1, 10000, (1,)).item())
+        operation = torch.randint(0, 4, (1,)).item()
+        
+        if operation == 0:
+            op = '+'
+            c = str(int(a) + int(b))[::-1]
+        elif operation == 1:
+            op = '-'
+            c = str(int(a) - int(b))[::-1]
+        elif operation == 2:
+            op = '*'
+            c = str(int(a) * int(b))[::-1]
+        else:
+            op = '/'
+            c = str(int(a) // int(b))[::-1]  # Integer division
+            
+        problem = f"{a} {op} {b} = {c}"
+        if len(problem) <= block_size:
+            #return problem[:block_size]
+            return problem.ljust(block_size)
 
 def get_batch():
     '''Generate batch of encoded problems and masked targets'''
@@ -55,11 +73,15 @@ def get_batch():
     # mask input positions of a + b with -1 in the targets
     for i in range(batch_size):
         eq_str = decode(x[i].tolist())
-        plus_pos = eq_str.index('+')
+        for op in ['+', '-', '*', '/']:
+            if op in eq_str:
+                op_pos = eq_str.index(op)
+                break
+
         equal_pos = eq_str.index('=')
-        a_pos = plus_pos - 1
+        a_pos = op_pos - 1
         b_pos = equal_pos - 1
-        y[i, [a_pos, plus_pos, b_pos, equal_pos]] = -1
+        y[i, [a_pos, op_pos, b_pos, equal_pos]] = -1
 
     x, y = x.to(device), y.to(device)
     return x, y
@@ -201,8 +223,7 @@ for iter in range(max_iters):
 #generated_text = decode(generated_indices)
 #print(generated_text)
 
-# test model
-def test_addition_generation(model, num_problems = 10):
+def test_arithmetic_generation(model, num_problems = 10):
     for _ in range(num_problems):
         problem = generate_random_problem()
         encoded = encode(problem.ljust(block_size))  # pad to block_size
@@ -217,4 +238,4 @@ def test_addition_generation(model, num_problems = 10):
         print(f"Generated Solution: {generated_text}")
         print("")
 
-test_addition_generation(model, num_problems = 5)
+test_arithmetic_generation(model, num_problems = 100)
