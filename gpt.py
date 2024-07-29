@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 batch_size = 32
-block_size = 30
+block_size = 40
 max_iters = 5000
 eval_interval = 500
 learning_rate = 1e-4
@@ -15,7 +15,7 @@ n_layer = 6
 dropout = 0.5
 
 # mapping from characters to integers
-vocab = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '-', '*', '/', '=', ' ']
+vocab = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '-', '*', '/', '=', ' ', '.']
 vocab_size = len(vocab)
 char_to_idx = {ch: idx for idx, ch in enumerate(vocab)}
 idx_to_char = {idx: ch for ch, idx in char_to_idx.items()}
@@ -56,7 +56,7 @@ def generate_random_problem():
             c = str(int(a) * int(b))[::-1]
         else:
             op = '/'
-            c = str(int(a) // int(b))[::-1]  # Integer division
+            c = str('%.3f'%(int(a) / int(b)))[::-1]
             
         problem = f"{a} {op} {b} = {c}"
         if len(problem) <= block_size:
@@ -100,39 +100,36 @@ def estimate_loss():
     model.train()
     return out
 
-class Head(nn.Module):
-    def __init__(self, head_size: int):
+class MultiHeadAttention(nn.Module):
+    def __init__(self, num_heads: int, head_size: int):
         super().__init__()
-        self.key = nn.Linear(n_embd, head_size, bias=False)
-        self.query = nn.Linear(n_embd, head_size, bias=False)
-        self.value = nn.Linear(n_embd, head_size, bias=False)
-        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
+        self.num_heads = num_heads
+        self.head_size = head_size
+
+        self.key = nn.Linear(n_embd, num_heads * head_size, bias=False)
+        self.query = nn.Linear(n_embd, num_heads * head_size, bias=False)
+        self.value = nn.Linear(n_embd, num_heads * head_size, bias=False)
+        self.proj = nn.Linear(n_embd, n_embd)
         self.dropout = nn.Dropout(dropout)
+
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
     
     def forward(self, x):
         B, T, C = x.shape
-        k = self.key(x)
-        q = self.query(x)
+        k = self.key(x).view(B, T, self.num_heads, self.head_size).transpose(1, 2)
+        q = self.query(x).view(B, T, self.num_heads, self.head_size).transpose(1, 2)
+        v = self.value(x).view(B, T, self.num_heads, self.head_size).transpose(1, 2)
+
         # compute attention scores
-        weight = q @ k.transpose(-2, -1) * C ** -0.5 # (B, T, C) @ (B, C, T) -> (B, T, T)
+        weight = q @ k.transpose(-2, -1) * self.head_size ** -0.5 # (B, num_heads, T, head_size) @ (B, num_heads, head_size, T) -> (B, num_heads, T, T)
         # decoder block
         weight = weight.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
         weight = F.softmax(weight, dim=-1)
         weight = self.dropout(weight)
-        # weighted aggregation of values
-        v = self.value(x)
-        out = weight @ v
-        return out
 
-class MultiHeadAttention(nn.Module):
-    def __init__(self, num_heads: int, head_size: int):
-        super().__init__()
-        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
-        self.proj = nn.Linear(n_embd, n_embd)
-        self.dropout = nn.Dropout(dropout)
-    
-    def forward(self, x):
-        out = torch.cat([h(x) for h in self.heads], dim = -1)
+        # weighted aggregation of values
+        out = weight @ v
+        out = out.transpose(1, 2).contiguous().view(B, T, self.num_heads * self.head_size) # re-assamble all heads
         out = self.dropout(self.proj(out))
         return out
 
